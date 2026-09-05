@@ -1,0 +1,67 @@
+# Reusable Python CI gate for the tftio repositories.
+#
+# The GitHub Actions counterpart of the `python` component tftio/ci-components
+# published for the self-hosted GitLab instance, and the sibling of rust-ci.yml.
+# See rust-ci.yml for the shared rationale.
+# The contract is the same: mise installs the toolchain the repository declares,
+# then the repository's own `mise run <gate>` decides whether the gate passes.
+#
+# Two gate shapes exist in this fleet and both are served by the `gate-task`
+# input rather than by two workflows. Package repositories run `ci`. Content
+# repositories -- ones whose toolchain exists to lint prose and configuration
+# rather than to build anything -- run `check`. The GitLab component called this content mode and the
+# distinction is worth keeping, because a content repository running `ci` fails
+# on a task it has no reason to define.
+#
+# See rust-ci.yml for why there is no container image and why third-party actions
+# are pinned by commit SHA.
+
+name: python-ci
+
+on:
+  workflow_call:
+    inputs:
+      gate-task:
+        description: >-
+          The mise task this gate runs. `ci` for packages; `check` for
+          content-mode repositories.
+        type: string
+        default: ci
+      runner:
+        description: >-
+          The GitHub-hosted runner label. Self-hosted runners are deliberately not
+          supported; see rust-ci.yml.
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Check out the calling repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the declared toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      # uv's own cache, keyed on the resolved lockfile. Restored on a partial key
+      # match so a lockfile edit warms from the previous resolution rather than
+      # starting cold. Repositories without a uv.lock -- content-mode ones, for
+      # instance -- match nothing and skip the restore at negligible cost.
+      - name: Restore the uv cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Run the repository's gate
+        run: mise run ${{ inputs.gate-task }}

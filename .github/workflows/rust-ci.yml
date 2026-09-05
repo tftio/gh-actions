@@ -1,0 +1,81 @@
+# Reusable Rust CI gate for the tftio repositories.
+#
+# This is the GitHub Actions counterpart of the `rust` component that
+# tftio/ci-components published for the self-hosted GitLab instance. The contract
+# it offers a calling repository is deliberately identical: install the toolchain
+# the repository declares in its own mise configuration, then run the repository's
+# own `mise run <gate>`. Nothing about what a gate *means* moves into this file --
+# a repository that changes its checks changes its own mise tasks and this
+# workflow follows without an edit here.
+#
+# WHY THERE IS NO CONTAINER IMAGE. The GitLab components ran jobs inside a CI
+# image published to a private registry that a GitHub-hosted runner cannot reach,
+# and the image was not republished to GHCR. The reasoning is recorded in full in
+# the private migration plan; the short form is that an image can only pre-bake the
+# toolchain and the prebuilt
+# cargo helper binaries -- which install in seconds -- and cannot pre-bake
+# `target/` or a resolved `~/.cargo` for eighteen distinct dependency graphs, which
+# is where Rust CI actually spends its time. Dropping the image also removes the
+# failure class that broke tftio/planner, where the image's mise disagreed with a
+# repository's committed mise.lock.
+#
+# Third-party actions are pinned by commit SHA rather than by tag. A tag is
+# mutable and a compromised or retagged action would execute with this workflow's
+# permissions in every consuming repository at once. The version each SHA
+# corresponds to is named in the comment beside it so a human can audit the pin.
+
+name: rust-ci
+
+on:
+  workflow_call:
+    inputs:
+      gate-task:
+        description: >-
+          The mise task this gate runs. `ci` for packages; `check` for
+          content-mode repositories that lint prose and configuration only.
+        type: string
+        default: ci
+      runner:
+        description: >-
+          The GitHub-hosted runner label. Self-hosted runners are deliberately not
+          supported: a self-hosted runner executing a fork's pull request would run
+          untrusted code on LAN hardware, which is the exposure the migration plan
+          rules out.
+        type: string
+        default: ubuntu-latest
+      rust-cache:
+        description: Whether to cache cargo registry and build artifacts.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ${{ inputs.runner }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out the calling repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # mise installs the toolchain the repository itself declares, and caches
+      # what it installs. `install: true` performs `mise install` for us, so the
+      # repository's mise.toml remains the single declaration of its toolchain.
+      - name: Install the declared toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      # Caches the cargo registry and the build artifacts, keyed on the lockfile
+      # and the compiler version. This is the half of CI cost a container image
+      # could never have addressed.
+      - name: Restore the cargo cache
+        if: inputs.rust-cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Run the repository's gate
+        run: mise run ${{ inputs.gate-task }}

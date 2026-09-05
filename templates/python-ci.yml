@@ -1,0 +1,18 @@
+# Caller template: copy to .github/workflows/ci.yml in a Python repository.
+#
+# Content-mode repositories -- ones whose toolchain lints prose and configuration
+# rather than building a package -- pass `gate-task: check` instead of the default
+# `ci`, matching the mode the GitLab component called content mode.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: tftio/gh-actions/.github/workflows/python-ci.yml@v1
+    # with:
+    #   gate-task: check

@@ -1,0 +1,18 @@
+# Caller template: copy to .github/workflows/ci.yml in a Rust repository.
+#
+# Pin the tag, never a branch. The shared workflows are versioned so that a change
+# to the CI layer reaches repositories when they choose it, which is the property
+# the GitLab component library provided and which the fleet had partly lost -- four
+# different component versions were pinned simultaneously across the instance when
+# the migration was planned.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v1
