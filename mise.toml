@@ -1,0 +1,23 @@
+# Toolchain for this repository's own gate.
+#
+# gh-actions holds no application code, so its gate lints what it does hold:
+# the workflow definitions other repositories depend on. A syntax error here
+# would otherwise be discovered by a consumer rather than by this repository.
+#
+# The self-test workflow calls this repository's own reusable workflows the way
+# a consumer calls them -- by full path and pinned tag -- so `mise run ci` is
+# also what proves the shared gates are callable at all.
+
+[settings]
+lockfile = true
+
+[tools]
+actionlint = "1.7.12"
+
+[tasks.ci]
+description = "Lint the reusable workflows and the caller templates"
+run = "actionlint .github/workflows/*.yml"
+
+[tasks.check]
+description = "Alias for ci; content-mode consumers call this task name"
+depends = ["ci"]
