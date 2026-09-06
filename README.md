@@ -22,11 +22,20 @@ share across eighteen repositories that do genuinely different things.
 ```yaml
 jobs:
   ci:
-    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v1
+    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v1.1.0
 ```
 
 Copy the appropriate file from `templates/` into a repository's
 `.github/workflows/ci.yml` and pin the tag.
+
+### Versioning
+
+Consumers pin a full, immutable `vX.Y.Z` tag. There is deliberately no moving `v1`
+alias, despite the Actions convention of publishing one: a moving major tag is a
+mutable reference, which is the property this fleet has already been bitten by --
+four different component versions were pinned across the GitLab instance at
+migration time precisely because nobody could see what a pin meant. An immutable
+pin makes an upgrade a visible commit in the consuming repository.
 
 ## Why this repository is public
 

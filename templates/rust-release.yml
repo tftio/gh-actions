@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   release:
-    uses: tftio/gh-actions/.github/workflows/rust-release.yml@v1
+    uses: tftio/gh-actions/.github/workflows/rust-release.yml@v1.1.0
     # with:
     #   publish: true
     #   release-binaries: false

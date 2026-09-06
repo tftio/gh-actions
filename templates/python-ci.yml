@@ -13,6 +13,6 @@ on:
 
 jobs:
   ci:
-    uses: tftio/gh-actions/.github/workflows/python-ci.yml@v1
+    uses: tftio/gh-actions/.github/workflows/python-ci.yml@v1.1.0
     # with:
     #   gate-task: check

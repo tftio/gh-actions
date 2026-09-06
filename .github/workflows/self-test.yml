@@ -1,7 +1,7 @@
 # Proves the shared gates are callable the way a consumer calls them.
 #
 # These jobs reference this repository's own reusable workflows by full path and
-# pinned tag -- tftio/gh-actions/.github/workflows/<file>@v1 -- rather than by the
+# pinned tag -- tftio/gh-actions/.github/workflows/<file>@v1.1.0 -- rather than by
 # local `./.github/workflows/<file>` form. The local form would test the workflow
 # body while skipping the thing most likely to break for a consumer: cross-
 # repository resolution of a reusable workflow at a pinned ref. Testing the shape
@@ -21,12 +21,12 @@ on:
 jobs:
   rust-gate:
     name: rust-ci callable
-    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v1
+    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v1.1.0
     with:
       rust-cache: false
 
   python-gate:
     name: python-ci callable
-    uses: tftio/gh-actions/.github/workflows/python-ci.yml@v1
+    uses: tftio/gh-actions/.github/workflows/python-ci.yml@v1.1.0
     with:
       gate-task: check
