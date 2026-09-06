@@ -57,6 +57,25 @@ these workflows' permissions across every consuming repository at once. Each pin
 carries a comment naming the version it corresponds to, so the pin can be audited
 without resolving the SHA by hand.
 
+## Lockfiles must cover the CI platform
+
+`mise-action` runs `mise install --locked` whenever a repository commits a
+`mise.lock`, so the lockfile must carry an entry for the runner's platform —
+`linux-x64` for every gate here. A lockfile generated only on a developer's macOS
+machine holds `macos-arm64` entries alone and fails the install step with
+`No lockfile URL found for <tool> on platform linux-x64`.
+
+The fix belongs in the consuming repository, not in these workflows:
+
+```bash
+mise lock --platform linux-x64,macos-arm64
+```
+
+Locked mode is deliberately not disabled to paper over this. A lockfile that does
+not cover the platform CI runs on is not pinning CI to anything, and a green run
+that silently resolved its own versions would be worth less than a red one that
+says so.
+
 ## Runners
 
 GitHub-hosted only. A self-hosted runner executing a fork's pull request would run
