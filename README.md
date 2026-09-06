@@ -57,6 +57,34 @@ these workflows' permissions across every consuming repository at once. Each pin
 carries a comment naming the version it corresponds to, so the pin can be audited
 without resolving the SHA by hand.
 
+## Releases
+
+`rust-release.yml` drives cocogitto against the contract a repository already
+exposes through its own `cog.toml` and mise tasks — `release:version` as the
+pre-bump hook, `build` reading `$BUILD_TARGET`, `release:publish` gated on
+`PUBLISH_ENABLED`. Migrating a repository does not change how it releases.
+
+It runs as a single job rather than the two stages the GitLab component used. That
+decomposition cannot be carried over: a tag pushed with the default `GITHUB_TOKEN`
+does not trigger further workflow runs, so a tag-triggered build job would never
+fire. The alternative is a long-lived personal access token stored in every
+repository purely to defeat that safeguard, which this design declines to hold.
+
+The release policy is checked before any version is computed, so a repository that
+declares `publish: true` without a `CARGO_REGISTRY_TOKEN` fails with nothing
+written — no bump commit, no tag, nothing to unwind.
+
+Only a musl binary is produced. Darwin artifacts were dropped rather than moved to
+GitHub-hosted macOS runners, which bill at ten times the Linux rate.
+
+### Branch protection
+
+The release job pushes a version commit and a tag directly to the default branch,
+so a rule requiring pull requests will block every release unless the workflow can
+bypass it. Configure the ruleset to require the CI status check and add GitHub
+Actions to the bypass list; do not simply drop the protection. This must be
+verified on each repository as it is configured rather than assumed to work.
+
 ## Lockfiles must cover the CI platform
 
 `mise-action` runs `mise install --locked` whenever a repository commits a

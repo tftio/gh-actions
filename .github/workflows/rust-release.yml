@@ -1,0 +1,187 @@
+# Reusable release workflow for the tftio Rust repositories.
+#
+# The GitHub Actions counterpart of the release and build stages of the `rust`
+# component that ci-components published for GitLab. It drives the same contract a
+# repository already exposes through its own mise tasks and cog.toml, so migrating
+# a repository does not mean rewriting how it releases:
+#
+#   cog.toml pre_bump_hooks -> mise run release:version {{version}}
+#   mise run release:publish (gated on PUBLISH_ENABLED)
+#   mise run build          (reads $BUILD_TARGET, stages into dist/)
+#
+# ONE JOB, NOT TWO. The GitLab design cut the tag in a release job and let the
+# pushed tag trigger a separate build pipeline. That decomposition cannot be
+# carried over: a tag pushed with the default GITHUB_TOKEN does not trigger further
+# workflow runs, so a tag-triggered release job would simply never fire. The
+# alternative is a personal access token stored in all eighteen repositories purely
+# to defeat that safeguard, which is a long-lived write credential this design
+# declines to hold. Bump, tag, build, release and publish therefore happen in one
+# job.
+#
+# NO DARWIN. The GitLab component built aarch64-apple-darwin on a self-hosted macOS
+# runner. GitHub-hosted macOS minutes bill at ten times the Linux rate, and no
+# consumer of these binaries was using the darwin asset -- every tftio tool on the
+# operator's machine is built from source by cargo install -- so darwin artifacts
+# were dropped rather than moved. A musl binary is the only artifact produced.
+#
+# NO RELEASE-AUTHORITY INPUT. The GitLab component carried one to stop a mirrored
+# instance racing the authority to the same version. With a single forge running CI
+# there is no second producer, so the guard is not ported.
+
+name: rust-release
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: >-
+          Whether this repository publishes to crates.io. Declaring true without
+          providing CARGO_REGISTRY_TOKEN is a hard error, checked before any
+          version is computed.
+        type: boolean
+        default: false
+      release-binaries:
+        description: Whether to build and attach a release binary.
+        type: boolean
+        default: true
+      build-target:
+        description: >-
+          The Rust target triple passed to the repository's `mise run build` as
+          BUILD_TARGET. Linux musl only; darwin targets are not supported here.
+        type: string
+        default: x86_64-unknown-linux-musl
+      runner:
+        description: The GitHub-hosted runner label.
+        type: string
+        default: ubuntu-latest
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        description: crates.io API token. Required when `publish` is true.
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ${{ inputs.runner }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      # Release policy first, before anything is computed or written. Every
+      # rejection below leaves the repository untouched: no bump commit, no tag,
+      # nothing to unwind. This ordering is inherited from the GitLab component and
+      # is the reason a misconfigured repository fails safely rather than halfway.
+      - name: Check the release policy
+        env:
+          PUBLISH_INTENT: ${{ inputs.publish }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${PUBLISH_INTENT}" = "true" ] && [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::publish is true but CARGO_REGISTRY_TOKEN is unset or empty." >&2
+            echo "Refusing to cut a release that cannot complete its publication step." >&2
+            echo "Add the secret to this repository, or set publish: false." >&2
+            exit 1
+          fi
+          echo "release policy ok (publish=${PUBLISH_INTENT})"
+
+      # Full history: cog computes the next version from the conventional-commit
+      # log, and a shallow clone would silently produce a wrong answer rather than
+      # an error.
+      - name: Check out the calling repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install the declared toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      - name: Restore the cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # `mise install` can rewrite mise.lock when the runner's mise writes a
+      # different lockfile revision than the committed one, and cog refuses to bump
+      # against a dirty tree -- so a release would fail on lockfile churn that has
+      # nothing to do with the release. This restore is inherited verbatim from the
+      # GitLab component, where its absence is what has kept tftio/planner red since
+      # 2026-08-28.
+      - name: Restore the committed lockfile
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch mise.lock >/dev/null 2>&1; then
+            git checkout -- mise.lock
+          fi
+          git config user.email "release-bot@tft.io"
+          git config user.name "release-bot"
+
+      # cog bump exits 0 whether or not it decides to release, so the presence of a
+      # new tag is the signal, never the exit code.
+      - name: Compute and cut the version
+        id: bump
+        run: |
+          set -euo pipefail
+          before="$(git tag -l | sort)"
+          cog bump --auto
+          after="$(git tag -l | sort)"
+          new="$(comm -13 <(echo "$before") <(echo "$after") | head -n1)"
+          if [ -z "$new" ]; then
+            echo "cog bump produced no new tag; nothing to release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new tag: $new"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$new" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the bump commit and tag
+        if: steps.bump.outputs.released == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"${GITHUB_REF_NAME}"
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      # musl needs both the target's standard library and a musl-capable linker.
+      # The runner image ships neither for a mise-managed toolchain, so both are
+      # installed here rather than assumed.
+      - name: Prepare the musl target
+        if: steps.bump.outputs.released == 'true' && inputs.release-binaries
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends musl-tools
+          mise exec -- rustup target add "${{ inputs.build-target }}"
+
+      - name: Build the release binary
+        if: steps.bump.outputs.released == 'true' && inputs.release-binaries
+        env:
+          BUILD_TARGET: ${{ inputs.build-target }}
+        run: mise run build
+
+      - name: Publish the GitHub release
+        if: steps.bump.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.release-binaries }}" = "true" ]; then
+            gh release create "$TAG" --title "$TAG" --generate-notes ./dist/*
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+
+      # Publication is invoked here rather than from a cocogitto post_bump_hook,
+      # matching ci-components 1.5.1 and later: a hook would publish before the
+      # push, so a crate could reach crates.io from a commit that never reached the
+      # forge.
+      - name: Publish to crates.io
+        if: steps.bump.outputs.released == 'true' && inputs.publish
+        env:
+          PUBLISH_ENABLED: "true"
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: mise run release:publish
