@@ -1,0 +1,26 @@
+# Caller template: copy to .github/workflows/release.yml in a Python repository.
+#
+# Runs only on the default branch. cog decides whether the accumulated commits
+# warrant a release; when they do not the job succeeds having done nothing, which
+# is why this is safe on every push to main.
+#
+# `publish: true` belongs only in a repository that actually publishes to a
+# package index. The presence of a release:publish task is not evidence of that
+# intent -- every repository in this fleet has one, gated off by default.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: tftio/gh-actions/.github/workflows/python-release.yml@v1.2.0
+    # with:
+    #   publish: true
+    # secrets:
+    #   UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}

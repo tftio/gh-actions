@@ -1,0 +1,155 @@
+# Reusable release workflow for the tftio Python repositories.
+#
+# The sibling of rust-release.yml, on the same contract and with the same
+# guarantees. Both drive what a repository already declares for itself:
+#
+#   cog.toml pre_bump_hooks -> mise run release:version {{version}}   (uv version ...)
+#   mise run release:publish (gated on PUBLISH_ENABLED)               (uv build && uv publish)
+#
+# It exists because dev-manager and pigeon carry cocogitto configuration and
+# would otherwise have gained a CI gate while silently losing the release
+# automation they already had under GitLab.
+#
+# TWO DIFFERENCES FROM THE RUST WORKFLOW, both consequences of the language
+# rather than of taste:
+#
+#   1. No binary build. Rust repositories attach an x86_64-unknown-linux-musl
+#      binary to the release; a Python project produces no equivalent artifact,
+#      so there is no `release-binaries` input and nothing is attached.
+#   2. The publication credential is UV_PUBLISH_TOKEN, which `uv publish` reads,
+#      rather than CARGO_REGISTRY_TOKEN.
+#
+# Everything else is deliberately identical, including the ordering that makes a
+# misconfigured repository fail safely: the policy check runs before any version
+# is computed, so a rejection leaves no bump commit and no tag to unwind.
+#
+# See rust-release.yml for why bump, tag and publish run as one job -- a tag
+# pushed with the default GITHUB_TOKEN triggers no further workflow runs, and the
+# alternative is a long-lived write credential in every repository.
+
+name: python-release
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: >-
+          Whether this repository publishes to a package index. Declaring true
+          without providing UV_PUBLISH_TOKEN is a hard error, checked before any
+          version is computed. The presence of a release:publish task is not an
+          intent to publish -- every repository in this fleet has one, gated off.
+        type: boolean
+        default: false
+      runner:
+        description: The GitHub-hosted runner label.
+        type: string
+        default: ubuntu-latest
+    secrets:
+      UV_PUBLISH_TOKEN:
+        description: Package index token. Required when `publish` is true.
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ${{ inputs.runner }}
+    steps:
+      # Policy first, before anything is computed or written, so that every
+      # rejection below leaves the repository exactly as it was.
+      - name: Check the release policy
+        env:
+          PUBLISH_INTENT: ${{ inputs.publish }}
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${PUBLISH_INTENT}" = "true" ] && [ -z "${UV_PUBLISH_TOKEN:-}" ]; then
+            echo "::error::publish is true but UV_PUBLISH_TOKEN is unset or empty." >&2
+            echo "Refusing to cut a release that cannot complete its publication step." >&2
+            echo "Add the secret to this repository, or set publish: false." >&2
+            exit 1
+          fi
+          echo "release policy ok (publish=${PUBLISH_INTENT})"
+
+      # Full history: cog computes the next version from the conventional-commit
+      # log, and a shallow clone would produce a wrong answer rather than an error.
+      - name: Check out the calling repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install the declared toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      - name: Restore the uv cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      # `mise install` can rewrite a committed lockfile when the runner's mise
+      # writes a different revision than the one in the tree, and cog refuses to
+      # bump against a dirty tree -- so a release would fail on lockfile churn
+      # unrelated to the release. Both mise.toml and .mise.toml conventions are in
+      # use across this fleet, and so are both lockfile names; restore whichever
+      # the repository actually tracks rather than assuming a spelling.
+      - name: Restore the committed lockfile
+        run: |
+          set -euo pipefail
+          for f in mise.lock .mise.lock; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              git checkout -- "$f"
+            fi
+          done
+          git config user.email "release-bot@tft.io"
+          git config user.name "release-bot"
+
+      # cog bump exits 0 whether or not it decides to release, so a new tag is the
+      # signal, never the exit code.
+      - name: Compute and cut the version
+        id: bump
+        run: |
+          set -euo pipefail
+          before="$(git tag -l | sort)"
+          cog bump --auto
+          after="$(git tag -l | sort)"
+          new="$(comm -13 <(echo "$before") <(echo "$after") | head -n1)"
+          if [ -z "$new" ]; then
+            echo "cog bump produced no new tag; nothing to release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new tag: $new"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$new" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the bump commit and tag
+        if: steps.bump.outputs.released == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"${GITHUB_REF_NAME}"
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      - name: Publish the GitHub release
+        if: steps.bump.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: gh release create "$TAG" --title "$TAG" --generate-notes
+
+      # After the push, never from a cocogitto hook: publishing from a hook runs
+      # before any push exists, so a refused push would strand a published version
+      # with no tag behind it. The repositories' own cog.toml files record this.
+      - name: Publish to the package index
+        if: steps.bump.outputs.released == 'true' && inputs.publish
+        env:
+          PUBLISH_ENABLED: "true"
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
+        run: mise run release:publish
