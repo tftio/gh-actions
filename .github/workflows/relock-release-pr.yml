@@ -1,0 +1,69 @@
+# Reusable lockfile relock for release pull requests — Python repositories only.
+#
+# release-please updates the version in pyproject.toml through the extra-files
+# entry in the calling repository's release-please-config.json. It does not
+# regenerate uv.lock, and uv.lock records the root package's own version, so after
+# a bump the committed lock lags the release.
+#
+# That failure is invisible where it is introduced. The release pull request's own
+# CI passes, because the lock still matches the version the branch was cut from;
+# the gate fails on the default branch immediately after the merge. Repositories
+# whose gate runs a lockfile check -- `uv lock --check` or similar -- will see it
+# and repositories without one will ship a wrong lock quietly.
+#
+# Rust needs no equivalent. release-please's rust strategy carries a CargoLock
+# updater alongside CargoToml and updates Cargo.lock whenever the file exists,
+# which was verified against the strategy source rather than assumed.
+#
+# LOOP SAFETY. The commit below is pushed with the default GITHUB_TOKEN, and
+# pushes made with GITHUB_TOKEN do not trigger workflow runs. This therefore
+# relocks at most once per branch update and is a no-op when the lock is already
+# current. When release-please later force-updates the branch under its app token,
+# this fires again and re-applies the relock.
+
+name: relock-release-pr
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: The GitHub-hosted runner label.
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: write
+
+jobs:
+  relock:
+    name: relock
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Check out the release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install the declared toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      - name: Relock the uv project
+        run: mise exec -- uv lock
+
+      - name: Commit the lockfile if it changed
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- uv.lock; then
+            echo "uv.lock already current; nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore(deps): relock uv lockfile to the release version"
+          git push origin "HEAD:${BRANCH}"

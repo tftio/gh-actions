@@ -68,34 +68,62 @@ without resolving the SHA by hand.
 
 ## Releases
 
-`rust-release.yml` and `python-release.yml` drive cocogitto against the contract a
-repository already exposes through its own `cog.toml` and mise tasks — `release:version` as the
-pre-bump hook, `build` reading `$BUILD_TARGET`, `release:publish` gated on
-`PUBLISH_ENABLED`. Migrating a repository does not change how it releases.
+Releases run through **release-please**, which opens a pull request containing the version
+bump and changelog. Merging that PR cuts the tag and the GitHub release. A separate
+workflow, triggered by `release: published`, builds and publishes what the tag names.
 
-It runs as a single job rather than the two stages the GitLab component used. That
-decomposition cannot be carried over: a tag pushed with the default `GITHUB_TOKEN`
-does not trigger further workflow runs, so a tag-triggered build job would never
-fire. The alternative is a long-lived personal access token stored in every
-repository purely to defeat that safeguard, which this design declines to hold.
+That split is the point: nothing in the release workflow builds an artifact, and nothing
+in the artifact workflow decides a version. A hand-edited version cannot reach a published
+binary, and a failed build cannot un-cut a release that already exists.
 
-The release policy is checked before any version is computed, so a repository that
-declares `publish: true` without a `CARGO_REGISTRY_TOKEN` fails with nothing
-written — no bump commit, no tag, nothing to unwind.
+This replaced a cocogitto release-on-merge design on 2026-09-07. cocogitto pushes a freshly
+created version commit straight to the default branch, and a rule requiring a status check
+rejects it — the commit has never been through CI because it did not exist a moment
+earlier. The documented exemption is to name GitHub Actions as a ruleset bypass actor, and
+that is unavailable outside an organization:
 
-Only a musl binary is produced, and only by the Rust workflow. Darwin artifacts were
-dropped rather than moved to GitHub-hosted macOS runners, which bill at ten times the
-Linux rate. The Python workflow attaches no artifact, because a Python project produces no
-equivalent, and its publication credential is `UV_PUBLISH_TOKEN` rather than
-`CARGO_REGISTRY_TOKEN`.
+```
+Actor GitHub Actions integration must be part of the ruleset source or owner organization
+```
 
-### Branch protection
+So on a personal account, required checks and cocogitto releases could not coexist.
+release-please dissolves the conflict rather than exempting anything: the bump arrives as a
+pull request and passes CI on its own merits.
 
-The release job pushes a version commit and a tag directly to the default branch,
-so a rule requiring pull requests will block every release unless the workflow can
-bypass it. Configure the ruleset to require the CI status check and add GitHub
-Actions to the bypass list; do not simply drop the protection. This must be
-verified on each repository as it is configured rather than assumed to work.
+### The release bot is a GitHub App, and this is not optional
+
+A pull request opened with the default `GITHUB_TOKEN` does not trigger `pull_request`
+workflows — GitHub's guard against recursive automation. A release PR created that way
+would carry no CI check at all and could never satisfy a required one, which would defeat
+the entire change. The app token exists to make the release PR *checkable*, not to grant
+privilege.
+
+It is also a better shape than the alternative that was rejected: a personal access token
+with write access to the default branch, stored in every repository. One app, installed
+where it is needed, revocable, not tied to a person's account.
+
+Each consuming repository needs `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`.
+
+### Per-repository configuration
+
+`release-please-config.json` and `.release-please-manifest.json` live in the consuming
+repository. **Seed the manifest with the current version** — an absent or empty manifest
+restarts versioning at `0.0.0`.
+
+Rust uses `release-type: "rust"`, which updates `Cargo.toml`, `Cargo.lock` and
+`CHANGELOG.md`. Verified against the strategy source rather than assumed: it carries a
+`CargoLock` updater applied whenever the file exists.
+
+Python uses `release-type: "simple"` with an `extra-files` TOML updater on
+`$.project.version`, because the built-in `python` strategy documents `setup.py` and
+`setup.cfg` and does not state whether it writes a PEP 621 version. Python repositories
+**must** also run the relock workflow: release-please does not regenerate `uv.lock`, and
+the lock records the package's own version, so it lags the release. That failure is
+invisible where it is introduced — the release PR's own CI passes, because the lock still
+matches the version the branch was cut from, and the gate fails after the merge.
+
+Only a musl binary is produced, and only for Rust. Darwin artifacts were dropped rather
+than moved to GitHub-hosted macOS runners, which bill at ten times the Linux rate.
 
 ## Lockfiles must cover the CI platform
 

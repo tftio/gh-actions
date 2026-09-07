@@ -1,14 +1,26 @@
-# Caller template: copy to .github/workflows/release.yml in a Python repository.
+# Caller templates for a Python repository's release path — two files.
 #
-# Runs only on the default branch. cog decides whether the accumulated commits
-# warrant a release; when they do not the job succeeds having done nothing, which
-# is why this is safe on every push to main.
+# Copy the first block to .github/workflows/release-please.yml and the second to
+# .github/workflows/relock-release-pr.yml.
 #
-# `publish: true` belongs only in a repository that actually publishes to a
-# package index. The presence of a release:publish task is not evidence of that
-# intent -- every repository in this fleet has one, gated off by default.
+# Python uses release-type "simple" with an extra-files updater rather than the
+# built-in python strategy, which documents setup.py and setup.cfg and does not
+# state whether it writes a PEP 621 [project] version:
+#
+#   release-please-config.json:
+#     { "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+#       "packages": { ".": { "release-type": "simple",
+#         "extra-files": [ { "type": "toml", "path": "pyproject.toml",
+#                            "jsonpath": "$.project.version" } ] } } }
+#
+#   .release-please-manifest.json:
+#     { ".": "0.1.0" }        # seed with the current version
+#
+# The relock workflow is required, not optional: release-please does not
+# regenerate uv.lock, and the lock records the package's own version.
 
-name: release
+# ---------- .github/workflows/release-please.yml ----------
+name: release-please
 
 on:
   push:
@@ -16,11 +28,29 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  release:
-    uses: tftio/gh-actions/.github/workflows/python-release.yml@v1.2.0
-    # with:
-    #   publish: true
-    # secrets:
-    #   UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
+  release-please:
+    uses: tftio/gh-actions/.github/workflows/release-please.yml@v2.0.0
+    secrets:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+# ---------- .github/workflows/relock-release-pr.yml ----------
+# name: relock-release-pr
+#
+# on:
+#   push:
+#     branches: ["release-please--branches--main--**"]
+#
+# permissions:
+#   contents: write
+#
+# concurrency:
+#   group: relock-release-pr-${{ github.ref }}
+#   cancel-in-progress: false
+#
+# jobs:
+#   relock:
+#     uses: tftio/gh-actions/.github/workflows/relock-release-pr.yml@v2.0.0

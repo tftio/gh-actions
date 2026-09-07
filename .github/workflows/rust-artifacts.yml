@@ -1,0 +1,115 @@
+# Reusable artifact and publication workflow for Rust repositories.
+#
+# Triggered by the calling repository on `release: published`, which release-please
+# fires when its release pull request is merged. The split is deliberate and
+# matches the one the release workflow's header describes: nothing here decides a
+# version, and nothing in release-please builds an artifact. A hand-edited version
+# therefore cannot reach a published binary, and a failed build cannot un-cut a
+# release that already exists.
+#
+# Only a musl binary is produced. Darwin artifacts were dropped rather than moved
+# to GitHub-hosted macOS runners, which bill at ten times the Linux rate, and
+# nothing consumed them.
+#
+# The publication policy is checked before anything is built, so a repository that
+# declares `publish` without a token fails immediately rather than after spending
+# several minutes compiling.
+
+name: rust-artifacts
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: >-
+          Whether this repository publishes to crates.io. Declaring true without
+          providing CARGO_REGISTRY_TOKEN is a hard error, checked first.
+        type: boolean
+        default: false
+      release-binaries:
+        description: Whether to build and attach a release binary.
+        type: boolean
+        default: true
+      build-target:
+        description: >-
+          The Rust target triple passed to the repository's `mise run build` as
+          BUILD_TARGET. Linux musl only; darwin targets are not supported.
+        type: string
+        default: x86_64-unknown-linux-musl
+      runner:
+        description: The GitHub-hosted runner label.
+        type: string
+        default: ubuntu-latest
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        description: crates.io API token. Required when `publish` is true.
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  artifacts:
+    name: artifacts
+    runs-on: ${{ inputs.runner }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check the publication policy
+        env:
+          PUBLISH_INTENT: ${{ inputs.publish }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${PUBLISH_INTENT}" = "true" ] && [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::publish is true but CARGO_REGISTRY_TOKEN is unset or empty." >&2
+            echo "The release tag already exists; add the secret and re-run this workflow." >&2
+            exit 1
+          fi
+          echo "publication policy ok (publish=${PUBLISH_INTENT})"
+
+      # The release tag, not the branch head: the artifact must be built from
+      # exactly what the release names.
+      - name: Check out the released tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install the declared toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      - name: Restore the cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # musl needs both the target's standard library and a musl-capable linker;
+      # the runner image ships neither for a mise-managed toolchain.
+      - name: Prepare the musl target
+        if: inputs.release-binaries
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends musl-tools
+          mise exec -- rustup target add "${{ inputs.build-target }}"
+
+      - name: Build the release binary
+        if: inputs.release-binaries
+        env:
+          BUILD_TARGET: ${{ inputs.build-target }}
+        run: mise run build
+
+      - name: Attach the binary to the release
+        if: inputs.release-binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" ./dist/* --clobber
+
+      - name: Publish to crates.io
+        if: inputs.publish
+        env:
+          PUBLISH_ENABLED: "true"
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: mise run release:publish

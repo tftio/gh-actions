@@ -1,0 +1,109 @@
+# Reusable release workflow: release-please opens a release pull request.
+#
+# This replaces the cocogitto workflows this repository published until
+# 2026-09-07. The change is structural rather than cosmetic, and the reason is
+# worth stating because it is not obvious from the diff.
+#
+# cocogitto's release-on-merge pushes a freshly created version commit directly
+# to the default branch. A branch rule requiring a status check rejects that
+# commit -- it has never been through CI, because it did not exist a moment ago.
+# The documented exemption is to name GitHub Actions as a ruleset bypass actor,
+# and that is unavailable on a user account: GitHub answers "Actor GitHub Actions
+# integration must be part of the ruleset source or owner organization". So on a
+# personal account, required checks and cocogitto releases are mutually
+# exclusive.
+#
+# release-please dissolves the conflict instead of exempting anything. It opens
+# a pull request containing the version bump and changelog; that PR passes CI on
+# its own merits like any other change; merging it cuts the tag and the GitHub
+# release. Nothing ever writes to a protected branch.
+#
+# WHY A GITHUB APP AND NOT THE DEFAULT TOKEN. A pull request opened with
+# GITHUB_TOKEN does not trigger `pull_request` workflows -- GitHub's guard
+# against recursive automation. A release PR created that way would therefore
+# carry no CI check at all, and could never satisfy a required one, which would
+# defeat the entire point of the change. An app token is not a workaround for
+# branch protection; it is what makes the release PR checkable.
+#
+# The app credential is a materially better shape than the alternative that was
+# rejected: a personal access token with write access to the default branch,
+# stored in every repository. One app, installed where it is needed, revocable,
+# and not tied to a person's account.
+#
+# WHAT THIS WORKFLOW DOES NOT DO. It builds nothing and publishes nothing.
+# release-please creates tags and GitHub releases; artifacts and registry
+# publication belong to a workflow triggered by `release: published`, so that a
+# hand-edited version cannot reach an artifact and a failed build cannot un-cut a
+# release.
+#
+# Per-repository configuration lives in the calling repository, as
+# release-please-config.json and .release-please-manifest.json. The manifest MUST
+# be seeded with the repository's current version, or releases restart from
+# 0.0.0.
+
+name: release-please
+
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: Path to the release-please configuration in the calling repository.
+        type: string
+        default: release-please-config.json
+      manifest-file:
+        description: >-
+          Path to the release-please manifest in the calling repository. Seed it with the
+          current version; an absent or empty manifest restarts versioning at 0.0.0.
+        type: string
+        default: .release-please-manifest.json
+      runner:
+        description: The GitHub-hosted runner label.
+        type: string
+        default: ubuntu-latest
+    secrets:
+      RELEASE_BOT_APP_ID:
+        description: App ID of the release bot GitHub App.
+        required: true
+      RELEASE_BOT_PRIVATE_KEY:
+        description: Private key of the release bot GitHub App.
+        required: true
+    outputs:
+      release_created:
+        description: Whether merging the release PR cut a release on this run.
+        value: ${{ jobs.release-please.outputs.release_created }}
+      tag_name:
+        description: The tag created, when a release was cut.
+        value: ${{ jobs.release-please.outputs.tag_name }}
+      version:
+        description: The version released, when a release was cut.
+        value: ${{ jobs.release-please.outputs.version }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      # Mint a short-lived installation token. Not for privilege: for visibility.
+      # See the header -- a PR opened by GITHUB_TOKEN runs no checks.
+      - name: Mint an app token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - name: Open or update the release pull request
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.token.outputs.token }}
+          config-file: ${{ inputs.config-file }}
+          manifest-file: ${{ inputs.manifest-file }}
