@@ -42,7 +42,9 @@ jobs:
 #
 # on:
 #   push:
-#     branches: ["release-please--branches--main--**"]
+#     branches:
+#       - "release-please--branches--main"
+#       - "release-please--branches--main--**"
 #
 # permissions:
 #   contents: write
