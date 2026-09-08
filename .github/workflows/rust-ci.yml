@@ -47,6 +47,18 @@ on:
         description: Whether to cache cargo registry and build artifacts.
         type: boolean
         default: true
+      free-disk-space:
+        description: >-
+          Reclaim disk before the gate runs by deleting preinstalled SDKs the
+          runner image carries and this fleet never uses. Off by default because
+          it costs about a minute. Turn it on for repositories whose gate fills
+          the disk -- coverage instrumentation is the usual cause, since
+          cargo-llvm-cov writes a .profraw per test process and a large suite
+          produces hundreds of them on top of an instrumented target directory.
+          The symptom is "No space left on device" from LLVM's profile writer,
+          which surfaces as an unrelated-looking test failure.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -58,6 +70,17 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
+      # Before checkout, so the reclaim cannot race anything the job has written.
+      - name: Reclaim disk
+        if: inputs.free-disk-space
+        run: |
+          set -euo pipefail
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/share/powershell /usr/share/swift \
+                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          echo "after:"; df -h / | tail -1
+
       - name: Check out the calling repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
