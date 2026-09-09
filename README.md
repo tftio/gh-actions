@@ -66,7 +66,63 @@ these workflows' permissions across every consuming repository at once. Each pin
 carries a comment naming the version it corresponds to, so the pin can be audited
 without resolving the SHA by hand.
 
-## Releases
+## Rust releases with release-plz
+
+The scratch proof on 2026-09-08 created a release PR and passed CI, but the
+post-merge release attempted cargo publication and failed for lack of a token.
+No new tag or GitHub Release was created. The pinned CLI requires explicit
+`publish = false`; `git_only = true` alone does not disable publication.
+The corrected template and guard require explicit publication disabling. Recovery
+PR #2 passed CI and its merge produced v0.1.1 and a GitHub Release without cargo
+publication. The caller template targets the immutable `v2.2.0` shared tag.
+
+The workflow uses the existing GitHub Actions checkout and GitHub App scaffolding.
+It does not introduce an SSH deploy key. Agent-run Git commands continue to use SSH;
+hosted checkout retains the established Actions-token authentication.
+
+The additive `release-plz.yml` reusable workflow manages Rust version bumps through
+release pull requests, then creates tags and GitHub Releases when those PRs merge.
+It uses the existing release bot: the caller passes the `RELEASE_BOT_APP_ID`
+repository variable as the `app-id` input and passes `RELEASE_BOT_PRIVATE_KEY`
+as a secret. Its PR commits use release-plz's GitHub GraphQL path,
+which creates verified commits; version commits do not go to the default branch.
+
+Copy `templates/rust-release-plz.yml` into `.github/workflows/release-plz.yml` and
+`templates/release-plz.toml` beside the root `Cargo.toml`. The caller pins `v2.2.0`;
+use it only once that tag is published. Do not point it at an older release that
+does not contain this workflow. Remove
+the old release-please caller, config and manifest in the same consumer change,
+so only one mechanism watches the default branch.
+
+The configuration deliberately sets `git_only = true`: release-plz reads version
+anchors from matching git tags, but does not by itself skip cargo publication in
+the pinned CLI. The workflow requires workspace `publish = false` and rejects
+package overrides that enable publication or disable git-only mode.
+It accepts no registry credential. A tag must point at the
+commit whose manifest contains the same version, not merely carry the right name.
+Single-crate repositories use the default `v{{ version }}` tag pattern.
+
+`release_always = false` is also required: the upstream default can release on an
+ordinary push, whereas this workflow requires a merged release PR. Keep release
+creation and PR updates in separate jobs. Only the PR job uses concurrency;
+workflow-level concurrency could cancel the pending run for a release merge.
+
+The workflow pins release-plz/action v0.5.133 by its resolved commit SHA and the
+CLI to 0.3.162. It installs the consumer's declared mise toolchain. This phase
+does not enable registry publication anywhere; any existing artifact caller must
+also keep publication disabled. Both callers must be reviewed before publication
+is enabled, to avoid two publishers for the same version.
+
+The older shared release workflows and templates remain until their last
+consumers migrate; their retirement is a separate change. Local linting is not
+evidence of the live cycle: the throwaway proof must demonstrate PR creation, PR
+CI, merge, a componentless tag and a GitHub Release without registry publication.
+
+References: [configuration](https://release-plz.dev/docs/config),
+[GitHub concurrency guidance](https://release-plz.dev/docs/github/quickstart#concurrency),
+and [pinned action source](https://github.com/release-plz/action/blob/aec534bbd8631793b9b3b8f1ee6cd886c322e17f/action.yml).
+
+## Existing release-please path (pending consumer migration)
 
 Releases run through **release-please**, which opens a pull request containing the version
 bump and changelog. Merging that PR cuts the tag and the GitHub release. A separate

@@ -16,7 +16,7 @@ actionlint = "1.7.12"
 
 [tasks.ci]
 description = "Lint the reusable workflows and the caller templates"
-run = "actionlint .github/workflows/*.yml"
+run = "actionlint .github/workflows/*.yml templates/*.yml"
 
 [tasks.check]
 description = "Alias for ci; content-mode consumers call this task name"
