@@ -1,0 +1,6 @@
+# Copy beside the consuming repository's root Cargo.toml.
+# The matching vX.Y.Z tag must point to a manifest with that same version.
+[workspace]
+git_only = true
+publish = false
+release_always = false

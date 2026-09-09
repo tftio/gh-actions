@@ -1,0 +1,108 @@
+# Git-only Rust release automation. Registry publication is deliberately not part
+# of this contract: a later, reviewed change must enable it.
+#
+# The app token makes release PRs and published Releases trigger consumer CI and
+# artifact workflows. GitHub PR commits are created through release-plz's signed
+# GraphQL path. No step pushes a version commit to the default branch.
+name: release-plz
+
+on:
+  workflow_call:
+    inputs:
+      app-id:
+        description: App ID of the release bot GitHub App.
+        type: string
+        required: true
+    secrets:
+      RELEASE_BOT_PRIVATE_KEY:
+        description: Private key of the release bot GitHub App.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Create the git release
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    # Do not apply concurrency here: GitHub can cancel pending jobs even with
+    # cancel-in-progress=false, losing the run for a merged release PR.
+    steps:
+      - &checkout
+        name: Check out the calling repository and all tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # Keep the read-only default token for release-plz's later git fetch
+          # of its temporary PR branch, including in private repositories.
+          persist-credentials: true
+
+      - &git-only
+        name: Require git-only release PR configuration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          config = tomllib.loads(pathlib.Path("release-plz.toml").read_text())
+          workspace = config.get("workspace", {})
+          if workspace.get("git_only") is not True:
+              raise SystemExit("release-plz.toml must set workspace.git_only = true")
+          if workspace.get("release_always") is not False:
+              raise SystemExit("release-plz.toml must set workspace.release_always = false")
+          if workspace.get("publish") is not False:
+              raise SystemExit("release-plz.toml must set workspace.publish = false")
+          for package in config.get("package", []):
+              if package.get("git_only", True) is not True or package.get("publish", False) is not False:
+                  raise SystemExit("Every package must keep git_only enabled and publish disabled")
+          PY
+
+      - &toolchain
+        name: Install the declared toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      - &token
+        name: Mint an app token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ inputs.app-id }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Create tags and GitHub Releases for the merged release PR
+        uses: release-plz/action@aec534bbd8631793b9b3b8f1ee6cd886c322e17f # v0.5.133
+        with:
+          command: release
+          version: 0.3.162
+          config: release-plz.toml
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+
+  release-pr:
+    name: Open or update the release pull request
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-plz-pr-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - *checkout
+      - *git-only
+      - *toolchain
+      - *token
+
+      - name: Open or update the release pull request
+        uses: release-plz/action@aec534bbd8631793b9b3b8f1ee6cd886c322e17f # v0.5.133
+        with:
+          command: release-pr
+          version: 0.3.162
+          config: release-plz.toml
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}

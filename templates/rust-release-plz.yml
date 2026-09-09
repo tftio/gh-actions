@@ -1,0 +1,20 @@
+# Copy to .github/workflows/release-plz.yml and copy release-plz.toml beside
+# Cargo.toml. The immutable v2.2.0 tag contains the scratch-tested workflow.
+# Remove the old release-please caller/config/manifest in the same change.
+# Do not add workflow-level concurrency: it can drop a pending release run.
+name: release-plz
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-plz:
+    uses: tftio/gh-actions/.github/workflows/release-plz.yml@v2.2.0
+    with:
+      app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+    secrets:
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
