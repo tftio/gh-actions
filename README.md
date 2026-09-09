@@ -104,7 +104,9 @@ Single-crate repositories use the default `v{{ version }}` tag pattern.
 
 `release_always = false` is also required: the upstream default can release on an
 ordinary push, whereas this workflow requires a merged release PR. Keep release
-creation and PR updates in separate jobs. Only the PR job uses concurrency;
+creation and PR updates in separate jobs. The PR job waits for successful release
+creation before checking out tags, preventing a stale baseline from generating a
+duplicate PR for the version just released. Only the PR job uses concurrency;
 workflow-level concurrency could cancel the pending run for a release merge.
 
 The workflow pins release-plz/action v0.5.133 by its resolved commit SHA and the
