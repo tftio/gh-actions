@@ -107,8 +107,8 @@ jobs:
       # step fails loudly rather than connecting to an unverified host.
       #
       # CARGO_NET_GIT_FETCH_WITH_CLI makes cargo fetch git dependencies through the
-      # git CLI, which reads ~/.ssh; cargo's built-in git client consults only an
-      # SSH agent and would ignore the key.
+      # git CLI, which honours GIT_SSH_COMMAND; cargo's built-in git client consults
+      # only an SSH agent and would ignore the key.
       - name: Configure SSH for private git dependencies
         env:
           SSH_PRIVATE_KEY: ${{ secrets.ssh-private-key }}
@@ -120,16 +120,26 @@ jobs:
             exit 0
           fi
           install -d -m 700 "$HOME/.ssh"
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
-          chmod 600 "$HOME/.ssh/id_ed25519"
-          printf 'github.com %s\n' "$GITHUB_SSH_HOST_KEY" >> "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
+          key="$HOME/.ssh/id_ed25519"
+          known="$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          printf 'github.com %s\n' "$GITHUB_SSH_HOST_KEY" >> "$known"
+          chmod 600 "$known"
+          # Every path is passed to ssh explicitly and -F /dev/null ignores any ssh
+          # config the runner image carries. OpenSSH resolves ~/.ssh from the
+          # account's home directory, not $HOME, so relying on its defaults would tie
+          # this step to how the runner sets HOME. GIT_SSH_COMMAND carries the same
+          # options to git, and through CARGO_NET_GIT_FETCH_WITH_CLI to cargo.
+          ssh_opts=(-F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i "$key"
+                    -o "UserKnownHostsFile=$known" -o StrictHostKeyChecking=yes -o BatchMode=yes)
+          echo "GIT_SSH_COMMAND=ssh ${ssh_opts[*]}" >> "$GITHUB_ENV"
           echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
           # GitHub answers a successful key authentication with exit status 1 and a
           # greeting, because it offers no shell. The greeting is the signal, so the
           # exit status is discarded and the output is matched instead; piping ssh
           # into grep would fail under pipefail on every valid key.
-          greeting=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -T git@github.com 2>&1 || true)
+          greeting=$(ssh "${ssh_opts[@]}" -T git@github.com 2>&1 || true)
           if printf '%s\n' "$greeting" | grep -q 'successfully authenticated'; then
             echo "SSH deploy key authenticates to github.com."
           else
