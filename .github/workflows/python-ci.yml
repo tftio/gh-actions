@@ -33,6 +33,14 @@ on:
           supported; see rust-ci.yml.
         type: string
         default: ubuntu-latest
+    secrets:
+      ssh-private-key:
+        description: >-
+          A read-only SSH deploy key for a private git dependency the repository
+          fetches over SSH, such as a cargo git dependency on another private
+          tftio repository. Optional: without it the SSH step does nothing. The
+          key belongs in the calling repository's own secrets, never here.
+        required: false
 
 permissions:
   contents: read
@@ -44,6 +52,51 @@ jobs:
     steps:
       - name: Check out the calling repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Private git dependencies over SSH; see rust-ci.yml for the full rationale. A GitHub-hosted runner has no SSH key,
+      # and GitHub refuses a keyless SSH fetch even of a public repository, so a
+      # repository whose toolchain or build fetches a private tftio repository
+      # over ssh:// passes a read-only deploy key for it. This runs before the
+      # toolchain install because a mise tool can itself be built from such a
+      # repository. Without the secret the step does nothing and says so.
+      #
+      # GitHub's host key is pinned rather than learned with ssh-keyscan, which
+      # would trust whatever answered on first use. It is the ed25519 key from
+      # https://api.github.com/meta, fingerprint
+      # SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU, checked against the
+      # published fingerprint on 2026-09-14. If GitHub rotates its host key, this
+      # step fails loudly rather than connecting to an unverified host.
+      #
+      # CARGO_NET_GIT_FETCH_WITH_CLI makes cargo fetch git dependencies through the
+      # git CLI, which reads ~/.ssh; cargo's built-in git client consults only an
+      # SSH agent and would ignore the key.
+      - name: Configure SSH for private git dependencies
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ssh-private-key }}
+          GITHUB_SSH_HOST_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+        run: |
+          set -euo pipefail
+          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+            echo "No ssh-private-key secret was passed; SSH git access is not configured."
+            exit 0
+          fi
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf 'github.com %s\n' "$GITHUB_SSH_HOST_KEY" >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+          # GitHub answers a successful key authentication with exit status 1 and a
+          # greeting, because it offers no shell. The greeting is the signal, so the
+          # exit status is discarded and the output is matched instead; piping ssh
+          # into grep would fail under pipefail on every valid key.
+          greeting=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -T git@github.com 2>&1 || true)
+          if printf '%s\n' "$greeting" | grep -q 'successfully authenticated'; then
+            echo "SSH deploy key authenticates to github.com."
+          else
+            echo "::error::The ssh-private-key secret did not authenticate to github.com." >&2
+            exit 1
+          fi
 
       - name: Install the declared toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
