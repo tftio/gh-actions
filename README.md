@@ -45,6 +45,34 @@ for every consumer while the consumers are private. It holds no credentials and 
 secret values, and it must not acquire any: a secret belongs in the calling
 repository's own settings, where it is scoped to that repository.
 
+## Private git dependencies over SSH
+
+Some consumers depend on another private tftio repository fetched over SSH: a cargo
+git dependency, or a mise tool built from such a repository. A GitHub-hosted runner
+has no SSH key, and GitHub refuses a keyless SSH fetch even of a public repository.
+
+Both CI workflows accept one optional secret, `ssh-private-key`. The calling
+repository stores a read-only deploy key for the dependency in its own secrets and
+passes it through:
+
+```yaml
+jobs:
+  ci:
+    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@vX.Y.Z
+    secrets:
+      ssh-private-key: ${{ secrets.PLANNER_DEPLOY_KEY }}
+```
+
+The workflow writes the key before the toolchain install, pins GitHub's ed25519 host
+key rather than trusting `ssh-keyscan`, makes cargo fetch git dependencies through
+the git CLI so the key is used, and fails the job if the key does not authenticate.
+Without the secret the step does nothing.
+
+This keeps the rule above intact: the key lives in the consuming repository's
+settings, scoped there, and this repository still holds no secret values. A deploy
+key is read-only and grants access to exactly one repository, so one key for a
+dependency can serve every repository that consumes it.
+
 ## Why there is no container image
 
 An image can pre-bake the toolchain and the prebuilt cargo helper binaries. It
