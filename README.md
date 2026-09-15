@@ -130,6 +130,18 @@ It accepts no registry credential. A tag must point at the
 commit whose manifest contains the same version, not merely carry the right name.
 Single-crate repositories use the default `v{{ version }}` tag pattern.
 
+Every caller repository is private, so each git operation release-plz runs needs a
+credential. `actions/checkout` persists its token behind an `includeIf` keyed to the
+workspace's `.git` path, and release-plz updates an open release PR from a copy of
+the repository under `/tmp` that the `includeIf` does not match. On 2026-09-15 that
+fetch failed in `tftio/planner` ("could not read Username"); release-plz closed the
+open release PR, opened a replacement with unresolved stash conflict markers in
+`CHANGELOG.md`, `Cargo.lock` and `Cargo.toml`, and reported success. Checkout now
+persists no credential, and a step exports the app token to later steps as git
+environment configuration (`GIT_CONFIG_COUNT`/`KEY`/`VALUE`), which applies in every
+repository copy. After `release-pr`, the workflow fails if any file the release PR
+adds or modifies contains a conflict marker.
+
 `release_always = false` is also required: the upstream default can release on an
 ordinary push, whereas this workflow requires a merged release PR. Keep release
 creation and PR updates in separate jobs. The PR job waits for successful release

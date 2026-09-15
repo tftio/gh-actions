@@ -34,9 +34,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          # Keep the read-only default token for release-plz's later git fetch
-          # of its temporary PR branch, including in private repositories.
-          persist-credentials: true
+          # checkout persists its credential behind an includeIf keyed to this
+          # workspace's .git path, which release-plz's temporary copy of the
+          # repository does not match. The git-auth step below supplies the
+          # credential instead; persisting this one as well would send two
+          # Authorization headers from the workspace.
+          persist-credentials: false
 
       - &git-only
         name: Require git-only release PR configuration
@@ -76,6 +79,27 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
+      - &git-auth
+        name: Authenticate git in every repository copy
+        shell: bash
+        env:
+          APP_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          # release-pr updates an open release PR from a copy of the repository
+          # under /tmp. Without a credential that applies there, its fetch of a
+          # private repository fails ("could not read Username"), and release-plz
+          # has then committed unresolved stash conflict markers into a
+          # replacement PR while reporting success. Git's environment
+          # configuration applies to every repository copy in later steps.
+          set -euo pipefail
+          header=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          echo "::add-mask::$header"
+          {
+            echo "GIT_CONFIG_COUNT=1"
+            echo "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader"
+            echo "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic $header"
+          } >> "$GITHUB_ENV"
+
       - name: Create tags and GitHub Releases for the merged release PR
         uses: release-plz/action@aec534bbd8631793b9b3b8f1ee6cd886c322e17f # v0.5.133
         with:
@@ -100,8 +124,10 @@ jobs:
       - *git-only
       - *toolchain
       - *token
+      - *git-auth
 
       - name: Open or update the release pull request
+        id: release-pr
         uses: release-plz/action@aec534bbd8631793b9b3b8f1ee6cd886c322e17f # v0.5.133
         with:
           command: release-pr
@@ -109,3 +135,30 @@ jobs:
           config: release-plz.toml
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+
+      - name: Reject a release pull request carrying conflict markers
+        # The action writes pr={} when release-plz opened or updated no PR.
+        if: steps.release-pr.outputs.prs_created == 'true'
+        shell: bash
+        env:
+          RELEASE_PR: ${{ steps.release-pr.outputs.pr }}
+        run: |
+          # release-plz can report success after failing to restore its stashed
+          # work, leaving conflict markers committed in the PR it opened.
+          set -euo pipefail
+          head=$(jq -r '.head_branch // empty' <<<"$RELEASE_PR")
+          base=$(jq -r '.base_branch // empty' <<<"$RELEASE_PR")
+          if [ -z "$head" ] || [ -z "$base" ]; then
+            echo "::error::cannot read head_branch and base_branch from the release-plz pr output"
+            exit 1
+          fi
+          git fetch --quiet origin "refs/heads/$head:refs/remotes/origin/$head" "refs/heads/$base:refs/remotes/origin/$base"
+          status=0
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if git show "origin/$head:$path" | grep -nE '^(<<<<<<<|>>>>>>>)( |$)|^=======$'; then
+              echo "::error file=$path::release PR branch $head contains unresolved conflict markers"
+              status=1
+            fi
+          done < <(git diff --name-only --diff-filter=AM "origin/$base...origin/$head")
+          exit "$status"
