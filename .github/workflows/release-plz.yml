@@ -152,7 +152,10 @@ jobs:
             echo "::error::cannot read head_branch and base_branch from the release-plz pr output"
             exit 1
           fi
-          git fetch --quiet origin "refs/heads/$head:refs/remotes/origin/$head" "refs/heads/$base:refs/remotes/origin/$base"
+          # release-plz replaces the release branch on each update, so the
+          # remote-tracking ref checkout fetched is not an ancestor: force it.
+          # Without --quiet a failed fetch explains itself in the log.
+          git fetch origin "+refs/heads/$head:refs/remotes/origin/$head" "+refs/heads/$base:refs/remotes/origin/$base"
           status=0
           while IFS= read -r path; do
             [ -n "$path" ] || continue
