@@ -17,6 +17,14 @@ on:
       RELEASE_BOT_PRIVATE_KEY:
         description: Private key of the release bot GitHub App.
         required: true
+      ssh-private-key:
+        description: >-
+          A read-only SSH deploy key for a private git dependency the repository
+          fetches over SSH, such as a cargo git dependency on another private
+          tftio repository. release-plz runs cargo against the repository, so
+          such a dependency must be fetchable. Optional: without it the SSH step
+          does nothing. The key belongs in the calling repository's own secrets.
+        required: false
 
 permissions:
   contents: read
@@ -100,6 +108,45 @@ jobs:
             echo "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic $header"
           } >> "$GITHUB_ENV"
 
+      - &ssh
+        name: Configure SSH for private git dependencies
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ssh-private-key }}
+          GITHUB_SSH_HOST_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+        run: |
+          # Same contract as rust-ci.yml and python-ci.yml. release-plz runs cargo
+          # against the repository, so a private git dependency fetched over SSH
+          # must be reachable here too.
+          set -euo pipefail
+          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+            echo "No ssh-private-key secret was passed; SSH git access is not configured."
+            exit 0
+          fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/id_ed25519"
+          known="$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          printf 'github.com %s\n' "$GITHUB_SSH_HOST_KEY" >> "$known"
+          chmod 600 "$known"
+          # Every path is passed to ssh explicitly and -F /dev/null ignores any ssh
+          # config the runner image carries. GIT_SSH_COMMAND carries the same
+          # options to git, and through CARGO_NET_GIT_FETCH_WITH_CLI to cargo.
+          ssh_opts=(-F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i "$key"
+                    -o "UserKnownHostsFile=$known" -o StrictHostKeyChecking=yes -o BatchMode=yes)
+          echo "GIT_SSH_COMMAND=ssh ${ssh_opts[*]}" >> "$GITHUB_ENV"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+          # GitHub answers a successful key authentication with exit status 1 and a
+          # greeting; match the greeting rather than the exit status.
+          greeting=$(ssh "${ssh_opts[@]}" -T git@github.com 2>&1 || true)
+          if printf '%s\n' "$greeting" | grep -q 'successfully authenticated'; then
+            echo "SSH deploy key authenticates to github.com."
+          else
+            echo "::error::The ssh-private-key secret did not authenticate to github.com." >&2
+            exit 1
+          fi
+
       - name: Create tags and GitHub Releases for the merged release PR
         uses: release-plz/action@aec534bbd8631793b9b3b8f1ee6cd886c322e17f # v0.5.133
         with:
@@ -125,6 +172,7 @@ jobs:
       - *toolchain
       - *token
       - *git-auth
+      - *ssh
 
       - name: Open or update the release pull request
         id: release-pr
