@@ -51,9 +51,11 @@ Some consumers depend on another private tftio repository fetched over SSH: a ca
 git dependency, or a mise tool built from such a repository. A GitHub-hosted runner
 has no SSH key, and GitHub refuses a keyless SSH fetch even of a public repository.
 
-Both CI workflows accept one optional secret, `ssh-private-key`. The calling
-repository stores a read-only deploy key for the dependency in its own secrets and
-passes it through:
+Both CI workflows and `release-plz.yml` accept one optional secret,
+`ssh-private-key`. release-plz runs cargo against the repository, so a release fails
+on the same unreachable dependency CI does; `tftio/asana-cli` could not open a release
+PR until it passed the key there too (run 35028608827). The calling repository stores a
+read-only deploy key for the dependency in its own secrets and passes it through:
 
 ```yaml
 jobs:
@@ -105,8 +107,10 @@ PR #2 passed CI and its merge produced v0.1.1 and a GitHub Release without cargo
 publication. The caller template targets the immutable `v2.2.0` shared tag.
 
 The workflow uses the existing GitHub Actions checkout and GitHub App scaffolding.
-It does not introduce an SSH deploy key. Agent-run Git commands continue to use SSH;
-hosted checkout retains the established Actions-token authentication.
+It needs no SSH deploy key of its own; a caller with a private git dependency passes
+one as the optional `ssh-private-key` secret described above. Agent-run Git commands
+continue to use SSH; hosted checkout retains the established Actions-token
+authentication.
 
 The additive `release-plz.yml` reusable workflow manages Rust version bumps through
 release pull requests, then creates tags and GitHub Releases when those PRs merge.
