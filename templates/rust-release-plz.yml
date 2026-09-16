@@ -1,7 +1,9 @@
 # Copy to .github/workflows/release-plz.yml and copy release-plz.toml beside
-# Cargo.toml. The immutable v2.2.0 tag contains the scratch-tested workflow.
+# Cargo.toml. Pin a published immutable gh-actions tag that contains the workflow.
 # Remove the old release-please caller/config/manifest in the same change.
 # Do not add workflow-level concurrency: it can drop a pending release run.
+# Set `id-token: write` so an opted-in crate can use crates.io trusted publishing;
+# release-plz obtains a short-lived token only when release-plz.toml enables publish.
 name: release-plz
 
 on:
@@ -10,10 +12,11 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   release-plz:
-    uses: tftio/gh-actions/.github/workflows/release-plz.yml@v2.2.0
+    uses: tftio/gh-actions/.github/workflows/release-plz.yml@vX.Y.Z
     with:
       app-id: ${{ vars.RELEASE_BOT_APP_ID }}
     secrets:

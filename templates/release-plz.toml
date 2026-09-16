@@ -1,6 +1,10 @@
 # Copy beside the consuming repository's root Cargo.toml.
 # The matching vX.Y.Z tag must point to a manifest with that same version.
 [workspace]
+# Git-only is the default. To publish every package from this repository, set
+# git_only = false and publish = true together. To publish one package from a
+# workspace, keep this default and add a [[package]] entry that sets the same
+# false/true pair for that package.
 git_only = true
 publish = false
 release_always = false
