@@ -100,11 +100,11 @@ without resolving the SHA by hand.
 
 The scratch proof on 2026-09-08 created a release PR and passed CI, but the
 post-merge release attempted cargo publication and failed for lack of a token.
-No new tag or GitHub Release was created. The pinned CLI requires explicit
-`publish = false`; `git_only = true` alone does not disable publication.
-The corrected template and guard require explicit publication disabling. Recovery
-PR #2 passed CI and its merge produced v0.1.1 and a GitHub Release without cargo
-publication. The caller template targets the immutable `v2.2.0` shared tag.
+No new tag or GitHub Release was created. The pinned CLI requires an explicit,
+consistent release policy: `git_only = true, publish = false` for git-only
+releases, or `git_only = false, publish = true` for registry publication.
+Recovery PR #2 passed CI and its merge produced v0.1.1 and a GitHub Release
+without cargo publication.
 
 The workflow uses the existing GitHub Actions checkout and GitHub App scaffolding.
 It needs no SSH deploy key of its own; a caller with a private git dependency passes
@@ -120,17 +120,24 @@ as a secret. Its PR commits use release-plz's GitHub GraphQL path,
 which creates verified commits; version commits do not go to the default branch.
 
 Copy `templates/rust-release-plz.yml` into `.github/workflows/release-plz.yml` and
-`templates/release-plz.toml` beside the root `Cargo.toml`. The caller pins `v2.2.0`;
-use it only once that tag is published. Do not point it at an older release that
-does not contain this workflow. Remove
+`templates/release-plz.toml` beside the root `Cargo.toml`. Replace `vX.Y.Z` with
+the published immutable tag that contains the desired workflow; never use a branch
+or moving major alias. Remove
 the old release-please caller, config and manifest in the same consumer change,
 so only one mechanism watches the default branch.
 
-The configuration deliberately sets `git_only = true`: release-plz reads version
-anchors from matching git tags, but does not by itself skip cargo publication in
-the pinned CLI. The workflow requires workspace `publish = false` and rejects
-package overrides that enable publication or disable git-only mode.
-It accepts no registry credential. A tag must point at the
+The template deliberately sets `git_only = true, publish = false`, which keeps a
+repository git-only: release-plz reads version anchors from matching git tags and
+skips `cargo publish`. A caller deliberately opts every package into publication
+by changing both workspace values to `git_only = false, publish = true`. A
+workspace can opt in only named packages by keeping the workspace pair and adding
+both values as `false` and `true`, respectively, to a `[[package]]` entry. The
+workflow rejects missing, partial, or inconsistent pairs, so an accidental
+`publish = true` does not run. An opted-in crate must be configured for crates.io
+trusted publishing for its repository, workflow, and environment before it can
+publish. The release job has `id-token: write`; release-plz exchanges its OIDC
+identity for a short-lived token as needed, so the workflow accepts no registry
+credential. A tag must point at the
 commit whose manifest contains the same version, not merely carry the right name.
 Single-crate repositories use the default `v{{ version }}` tag pattern.
 
@@ -154,10 +161,11 @@ duplicate PR for the version just released. Only the PR job uses concurrency;
 workflow-level concurrency could cancel the pending run for a release merge.
 
 The workflow pins release-plz/action v0.5.133 by its resolved commit SHA and the
-CLI to 0.3.162. It installs the consumer's declared mise toolchain. This phase
-does not enable registry publication anywhere; any existing artifact caller must
-also keep publication disabled. Both callers must be reviewed before publication
-is enabled, to avoid two publishers for the same version.
+CLI to 0.3.162. It installs the consumer's declared mise toolchain. Publication
+is enabled only by a reviewed caller configuration; git-only callers retain the
+template's policy. The workflow uses trusted publishing, not a
+`CARGO_REGISTRY_TOKEN` secret, so a crate not configured at crates.io fails closed
+rather than falling back to a long-lived token.
 
 The older shared release workflows and templates remain until their last
 consumers migrate; their retirement is a separate change. Local linting is not
@@ -166,6 +174,7 @@ CI, merge, a componentless tag and a GitHub Release without registry publication
 
 References: [configuration](https://release-plz.dev/docs/config),
 [GitHub concurrency guidance](https://release-plz.dev/docs/github/quickstart#concurrency),
+[trusted publishing](https://release-plz.dev/docs/github/quickstart#trusted-publishing),
 and [pinned action source](https://github.com/release-plz/action/blob/aec534bbd8631793b9b3b8f1ee6cd886c322e17f/action.yml).
 
 ## Existing release-please path (pending consumer migration)

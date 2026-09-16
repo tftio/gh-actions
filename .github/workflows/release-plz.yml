@@ -1,5 +1,5 @@
-# Git-only Rust release automation. Registry publication is deliberately not part
-# of this contract: a later, reviewed change must enable it.
+# Rust release automation. Registry publication is opt-in: a caller must set a
+# matching, explicit `git_only` and `publish` pair in release-plz.toml.
 #
 # The app token makes release PRs and published Releases trigger consumer CI and
 # artifact workflows. GitHub PR commits are created through release-plz's signed
@@ -34,6 +34,12 @@ jobs:
     name: Create the git release
     if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
+    # release-plz exchanges this job's OIDC identity for a short-lived crates.io
+    # token only when release-plz.toml opts a package into publication. No registry
+    # credential is stored in this repository or passed by the caller.
+    permissions:
+      contents: read
+      id-token: write
     # Do not apply concurrency here: GitHub can cancel pending jobs even with
     # cancel-in-progress=false, losing the run for a merged release PR.
     steps:
@@ -49,8 +55,8 @@ jobs:
           # Authorization headers from the workspace.
           persist-credentials: false
 
-      - &git-only
-        name: Require git-only release PR configuration
+      - &release-policy
+        name: Require an explicit, consistent release policy
         shell: bash
         run: |
           python3 - <<'PY'
@@ -58,16 +64,32 @@ jobs:
           import tomllib
 
           config = tomllib.loads(pathlib.Path("release-plz.toml").read_text())
+          def require_policy(scope: dict[str, object], label: str) -> None:
+              git_only = scope.get("git_only")
+              publish = scope.get("publish")
+              if type(git_only) is not bool or type(publish) is not bool:
+                  raise SystemExit(
+                      f"{label} must explicitly set boolean git_only and publish values"
+                  )
+              if (git_only, publish) not in ((True, False), (False, True)):
+                  raise SystemExit(
+                      f"{label} must use git_only = true, publish = false "
+                      "or git_only = false, publish = true"
+                  )
+
           workspace = config.get("workspace", {})
-          if workspace.get("git_only") is not True:
-              raise SystemExit("release-plz.toml must set workspace.git_only = true")
+          if not isinstance(workspace, dict):
+              raise SystemExit("release-plz.toml workspace must be a TOML table")
+          require_policy(workspace, "workspace")
           if workspace.get("release_always") is not False:
               raise SystemExit("release-plz.toml must set workspace.release_always = false")
-          if workspace.get("publish") is not False:
-              raise SystemExit("release-plz.toml must set workspace.publish = false")
-          for package in config.get("package", []):
-              if package.get("git_only", True) is not True or package.get("publish", False) is not False:
-                  raise SystemExit("Every package must keep git_only enabled and publish disabled")
+          packages = config.get("package", [])
+          if not isinstance(packages, list):
+              raise SystemExit("release-plz.toml package entries must be a TOML array")
+          for package in packages:
+              if not isinstance(package, dict) or not isinstance(package.get("name"), str):
+                  raise SystemExit("Every package entry must name its package")
+              require_policy(package, f"package {package['name']!r}")
           PY
 
       - &toolchain
@@ -168,7 +190,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - *checkout
-      - *git-only
+      - *release-policy
       - *toolchain
       - *token
       - *git-auth
