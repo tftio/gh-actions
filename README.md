@@ -260,3 +260,71 @@ says so.
 GitHub-hosted only. A self-hosted runner executing a fork's pull request would run
 untrusted code on privately operated hardware, which is the exposure that ruled
 self-hosted runners out for these repositories.
+
+## Shared Renovate preset
+
+`default.json` is a Renovate config preset for the fleet, covering the four
+inputs it actually uses: cargo manifests and lockfiles, `mise.toml` tool pins,
+PEP 621 (uv) Python dependencies, and GitHub Actions references -- including
+this repository's own reusable-workflow tags. A consuming repository extends
+it with a one-line stub instead of restating policy:
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>tftio/gh-actions"]
+}
+```
+
+`renovate.json` at the repository root is this repository's own self-config,
+and it extends the same preset (`github>tftio/gh-actions`, which resolves to
+`default.json` when no preset name is given). It exists as a separate file
+from the preset on purpose: Renovate's `github>owner/repo` reference resolves
+to `default.json` unless a preset name follows a colon, so a consumer writing
+`github>tftio/gh-actions` reaches the preset while this repository's own
+Renovate run reads `renovate.json` for its self-config, and the two files
+never collide. `github>tftio/gh-actions:renovate` would instead resolve to
+`renovate.json`, which is reserved for self-config for that reason -- the
+preset is never published under that name.
+
+### Policy
+
+- **Grouping.** Cargo, PEP 621 and mise minor/patch updates are each grouped
+  into one weekly pull request per consuming repository; major updates of each
+  are left ungrouped for individual review. The `tftio/gh-actions` reusable
+  workflow pin is its own group, updated with `rangeStrategy: pin` so a bump
+  always proposes a new immutable `vX.Y.Z` tag -- never a range and never a
+  moving alias. All other GitHub Actions step references (already pinned by
+  resolved commit SHA with a trailing version comment) are grouped separately.
+  A `lockfile maintenance` group refreshes lockfiles with no other change.
+- **Schedule.** Weekly, before 06:00 on Monday, for every group; vulnerability
+  alerts run on their own schedule (`at any time`).
+- **Vulnerability alerts.** Enabled, both Renovate's own `vulnerabilityAlerts`
+  and `osvVulnerabilityAlerts`, labelled `renovate` and `security`.
+- **Commit convention.** Semantic commits are enabled and default to
+  `build(deps): ...`, matching the fleet's conventional-commit convention for
+  dependency bumps; GitHub Actions groups (both the shared-workflow pin and
+  step pins) commit as `ci: ...` instead, since those changes touch workflow
+  definitions rather than a dependency manifest.
+- **Automerge is explicitly `false`**, at the top level and again on the
+  vulnerability-alerts block, and `platformAutomerge` is also `false`. This is
+  a deliberate, recorded decision, not an oversight: the Renovate bot holds
+  write access to every repository it runs against, and no repository gains
+  automerge without a decision recorded in the consolidation plan that
+  introduced this preset. Changing it is a policy decision, made here, once,
+  for every consumer at the same time.
+
+### Visibility and preset resolution
+
+This repository is public (see "Why this repository is public" above), which
+matters for how Renovate resolves a preset it references. The Mend Renovate
+GitHub App can read a **private** preset only when the app is installed on
+the repository that hosts it, in addition to being installed on the
+consuming repository, and only within the same account or organization.
+Because this repository is public, that restriction does not apply: any
+repository with the Renovate app installed -- public or private -- can
+resolve `github>tftio/gh-actions` without the app also being installed here,
+the same way it can reference any other public GitHub repository's preset.
+Installing the app here as well is still worthwhile so this repository gets
+its own dependency updates (see `renovate.json` above), but it is not a
+precondition for a consumer resolving the preset.

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Shared Renovate preset for the tftio fleet. Hosted here, in the existing shared-CI-contract repository, because policy is configuration rather than a credential -- the 'holds no secret values' rule governs secrets, not this file. A consuming repository extends it with a one-line stub; grouping, scheduling, vulnerability handling and the automerge decision all live here so each is declared once.",
+  "extends": [
+    "config:recommended"
+  ],
+  "dependencyDashboard": true,
+  "automerge": false,
+  "platformAutomerge": false,
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "rangeStrategy": "bump",
+  "labels": ["renovate"],
+  "schedule": ["before 6am on monday"],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "build",
+  "semanticCommitScope": "deps",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"],
+    "commitMessageAction": "Lock file maintenance",
+    "groupName": "lockfile maintenance"
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "labels": ["renovate", "security"],
+    "automerge": false
+  },
+  "osvVulnerabilityAlerts": true,
+  "packageRules": [
+    {
+      "description": "Cargo manifest/lockfile minor and patch bumps, grouped into one weekly PR per repo. Commits as build(deps) to match the fleet's conventional-commit convention.",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "cargo dependencies (non-major)",
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Cargo major bumps are reviewed individually, not grouped.",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["major"],
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "tftio/gh-actions reusable-workflow pin bumps (rust-ci.yml, rust-artifacts.yml, release-plz.yml, python-ci.yml). These are immutable vX.Y.Z tags on purpose -- rangeStrategy pin keeps the exact tag, never a range or moving alias -- and each bump is grouped into one PR per consuming repo so the tag stays consistent across that repo's workflow files. Commits as ci, matching the fleet's convention for workflow-only changes.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["tftio/gh-actions"],
+      "groupName": "tftio/gh-actions shared workflow pin",
+      "rangeStrategy": "pin",
+      "semanticCommitType": "ci",
+      "semanticCommitScope": "",
+      "schedule": ["before 6am on monday"],
+      "commitMessageTopic": "tftio/gh-actions reusable workflow pin"
+    },
+    {
+      "description": "All other GitHub Action step references (actions/checkout, jdx/mise-action, Swatinem/rust-cache, actions/create-github-app-token, actions/cache, release-plz/action) are already pinned by resolved SHA with a trailing version comment. Renovate updates the SHA and keeps the comment's version number in sync; grouped into one PR per repo, committed as ci.",
+      "matchManagers": ["github-actions"],
+      "excludeDepNames": ["tftio/gh-actions"],
+      "groupName": "github actions step pins",
+      "semanticCommitType": "ci",
+      "semanticCommitScope": "",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "uv-managed Python projects (pyproject.toml, PEP 621 deps) minor/patch bumps grouped per repo.",
+      "matchManagers": ["pep621"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "uv/python dependencies (non-major)",
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "uv/Python major bumps reviewed individually.",
+      "matchManagers": ["pep621"],
+      "matchUpdateTypes": ["major"],
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "mise.toml tool pins (rust toolchain, cargo:-installed CLIs, prek, cocogitto, taplo, etc.), minor/patch grouped per repo.",
+      "matchManagers": ["mise"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "mise tool pins (non-major)",
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "mise.toml major tool bumps (e.g. a Rust edition-relevant toolchain jump) reviewed individually.",
+      "matchManagers": ["mise"],
+      "matchUpdateTypes": ["major"],
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps",
+      "schedule": ["before 6am on monday"]
+    }
+  ]
+}
