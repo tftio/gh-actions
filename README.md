@@ -22,7 +22,7 @@ share across eighteen repositories that do genuinely different things.
 ```yaml
 jobs:
   ci:
-    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v1.1.0
+    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v2.5.0
 ```
 
 Copy the appropriate file from `templates/` into a repository's

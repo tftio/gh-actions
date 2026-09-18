@@ -13,7 +13,7 @@ on:
 
 jobs:
   ci:
-    uses: tftio/gh-actions/.github/workflows/python-ci.yml@v1.1.0
+    uses: tftio/gh-actions/.github/workflows/python-ci.yml@v2.5.0
     # with:
     #   gate-task: check
     # A repository that fetches a private tftio repository over SSH -- a cargo git

@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   release-please:
-    uses: tftio/gh-actions/.github/workflows/release-please.yml@v2.0.0
+    uses: tftio/gh-actions/.github/workflows/release-please.yml@v2.5.0
     secrets:
       RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
       RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -55,4 +55,4 @@ jobs:
 #
 # jobs:
 #   relock:
-#     uses: tftio/gh-actions/.github/workflows/relock-release-pr.yml@v2.0.0
+#     uses: tftio/gh-actions/.github/workflows/relock-release-pr.yml@v2.5.0

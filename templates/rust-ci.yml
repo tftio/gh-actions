@@ -15,7 +15,7 @@ on:
 
 jobs:
   ci:
-    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v1.1.0
+    uses: tftio/gh-actions/.github/workflows/rust-ci.yml@v2.5.0
     # A repository that fetches a private tftio repository over SSH -- a cargo git
     # dependency, or a mise tool built from one -- passes a read-only deploy key
     # for it. See "Private git dependencies over SSH" in the gh-actions README.
