@@ -5,7 +5,8 @@
     "config:recommended"
   ],
   "dependencyDashboard": true,
-  "automerge": false,
+  "automerge": true,
+  "automergeType": "pr",
   "platformAutomerge": false,
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
@@ -25,7 +26,7 @@
     "enabled": true,
     "schedule": ["at any time"],
     "labels": ["renovate", "security"],
-    "automerge": false
+    "automerge": true
   },
   "osvVulnerabilityAlerts": true,
   "packageRules": [
@@ -84,8 +85,8 @@
       "schedule": ["before 6am on monday"]
     },
     {
-      "description": "mise.toml tool pins (rust toolchain, cargo:-installed CLIs, prek, cocogitto, taplo, etc.), minor/patch grouped per repo.",
-      "matchManagers": ["mise"],
+      "description": "mise.toml tool pins (rust toolchain, cargo:-installed CLIs, prek, cocogitto, taplo, etc.), minor/patch grouped per repo. rust-toolchain.toml is matched too: where a repository commits one, it is derived from the mise `rust` pin and `check:locks` fails when the two disagree (RS-001), so both files must move in the same pull request or neither can pass CI.",
+      "matchManagers": ["mise", "rust-toolchain"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "mise tool pins (non-major)",
       "semanticCommitType": "build",
@@ -94,11 +95,18 @@
     },
     {
       "description": "mise.toml major tool bumps (e.g. a Rust edition-relevant toolchain jump) reviewed individually.",
-      "matchManagers": ["mise"],
+      "matchManagers": ["mise", "rust-toolchain"],
       "matchUpdateTypes": ["major"],
       "semanticCommitType": "build",
       "semanticCommitScope": "deps",
       "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "A major rust bump still has to move mise.toml and rust-toolchain.toml together, for the same RS-001 reason as the non-major group above.",
+      "matchManagers": ["mise", "rust-toolchain"],
+      "matchDepNames": ["rust"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "rust toolchain (major)"
     }
   ]
 }
