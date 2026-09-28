@@ -297,6 +297,10 @@ preset is never published under that name.
   moving alias. All other GitHub Actions step references (already pinned by
   resolved commit SHA with a trailing version comment) are grouped separately.
   A `lockfile maintenance` group refreshes lockfiles with no other change.
+  The `rust-toolchain` manager shares the mise groups: a committed
+  `rust-toolchain.toml` is derived from the mise `rust` pin and `check:locks`
+  rejects any disagreement (RS-001), so a bump that moved only one of the two
+  files would fail CI and could never merge.
 - **Schedule.** Weekly, before 06:00 on Monday, for every group; vulnerability
   alerts run on their own schedule (`at any time`).
 - **Vulnerability alerts.** Enabled, both Renovate's own `vulnerabilityAlerts`
@@ -306,13 +310,20 @@ preset is never published under that name.
   dependency bumps; GitHub Actions groups (both the shared-workflow pin and
   step pins) commit as `ci: ...` instead, since those changes touch workflow
   definitions rather than a dependency manifest.
-- **Automerge is explicitly `false`**, at the top level and again on the
-  vulnerability-alerts block, and `platformAutomerge` is also `false`. This is
-  a deliberate, recorded decision, not an oversight: the Renovate bot holds
-  write access to every repository it runs against, and no repository gains
-  automerge without a decision recorded in the consolidation plan that
-  introduced this preset. Changing it is a policy decision, made here, once,
-  for every consumer at the same time.
+- **Automerge is `true`**, at the top level and on the vulnerability-alerts
+  block, for every update type including majors. The fleet's goal is that every
+  repository lives on the latest release of every tool, in lockstep; a weekly
+  grouped pull request per repository that waits for a human defeats both, and
+  the repository's own `mise run ci` gate is what decides whether an update is
+  safe. This reverses the original `false`, which was recorded as a deliberate
+  decision; it is changed here, once, for every consumer at the same time.
+  - Renovate merges only when every status check on the pull request has
+    passed. A repository with no CI workflow therefore never automerges, and
+    its updates wait for review -- the gate is CI, never the absence of it.
+  - `platformAutomerge` stays `false`: no fleet repository enables GitHub's
+    "Allow auto-merge" setting or protects its default branch, so Renovate
+    performs the merge itself on its next run after checks pass
+    (`automergeType: "pr"`), rather than delegating to GitHub.
 
 ### Visibility and preset resolution
 
