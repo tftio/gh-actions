@@ -102,7 +102,7 @@ jobs:
       - &token
         name: Mint an app token
         id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ inputs.app-id }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -170,7 +170,7 @@ jobs:
           fi
 
       - name: Create tags and GitHub Releases for the merged release PR
-        uses: release-plz/action@aec534bbd8631793b9b3b8f1ee6cd886c322e17f # v0.5.133
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
         with:
           command: release
           version: 0.3.162
@@ -198,7 +198,7 @@ jobs:
 
       - name: Open or update the release pull request
         id: release-pr
-        uses: release-plz/action@aec534bbd8631793b9b3b8f1ee6cd886c322e17f # v0.5.133
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
         with:
           command: release-pr
           version: 0.3.162
