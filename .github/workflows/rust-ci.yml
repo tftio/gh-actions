@@ -151,7 +151,7 @@ jobs:
       # what it installs. `install: true` performs `mise install` for us, so the
       # repository's mise.toml remains the single declaration of its toolchain.
       - name: Install the declared toolchain
-        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install: true
           cache: true
