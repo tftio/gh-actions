@@ -173,7 +173,7 @@ jobs:
         uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
         with:
           command: release
-          version: 0.3.162
+          version: 0.4.3
           config: release-plz.toml
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
@@ -201,7 +201,7 @@ jobs:
         uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
         with:
           command: release-pr
-          version: 0.3.162
+          version: 0.4.3
           config: release-plz.toml
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
